@@ -1,0 +1,31 @@
+# ---- Python ----
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# ---- 外部工具：不进仓库 ----
+# ffmpeg.exe / ffprobe.exe 单个就 100MB+（GitHub 单文件上限正好是 100MB），
+# 而且它们各有各的许可证，不该混进本项目的版本历史。
+# 首次使用请运行 tools\get-tools.bat 自动下载（脚本里的地址由各自上游维护）。
+tools/*.exe
+tools/N_m3u8DL-RE-*
+tools/Logs/
+
+# ---- 打包产物 ----
+build/
+dist/
+*.spec
+
+# ---- 本机自检与调试文档：本机跑，不进仓库 ----
+# 与扩展仓库（MiuiX-M3U8-Extension）同一约定。
+tests/
+
+# ---- 系统 / 编辑器杂物 ----
+Thumbs.db
+desktop.ini
+.DS_Store
+.vscode/
+.idea/
+*.swp
+*~
