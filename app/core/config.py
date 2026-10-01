@@ -209,6 +209,7 @@ class Config:
         for key, value in data.items():
             if key == "defaults":
                 cfg.defaults = DownloadOptions.from_dict(value if isinstance(value, dict) else None)
+                cfg.defaults.url = ""       # 链接从不持久化，老配置里残留的也丢掉
             elif key == "max_concurrent":
                 try:
                     cfg.max_concurrent = max(1, int(value))
@@ -234,6 +235,16 @@ class Config:
                 pass            # 程序目录写不进去时保持只读沿用，不打扰用户
         return cfg
 
+    def _persisted_defaults(self) -> dict[str, object]:
+        """写进配置文件的那份 defaults。
+
+        **链接不落盘**：下载页的链接框每次打开都该是空的。它是一次性输入
+        （带 token 的地址、只在当次有效的链接），记住了反而碍事。
+        """
+        defaults = self.defaults.to_dict()
+        defaults.pop("url", None)
+        return defaults
+
     def to_dict(self) -> dict[str, object]:
         return {
             "theme_mode": self.theme_mode,
@@ -250,7 +261,7 @@ class Config:
             "update_proxy": self.update_proxy,
             "minimize_to_tray": self.minimize_to_tray,
             "close_to_tray": self.close_to_tray,
-            "defaults": self.defaults.to_dict(),
+            "defaults": self._persisted_defaults(),
         }
 
     def save(self) -> None:

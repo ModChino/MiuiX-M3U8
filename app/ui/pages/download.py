@@ -70,7 +70,8 @@ class DownloadPage(PageBase):
             "每行一个链接，可批量下载（支持 m3u8 / mpd / 直链）"
         )
         self.url_edit.setFixedHeight(96)      # 约 4 行
-        self.url_edit.setPlainText(self.config.defaults.url or "")
+        # 链接**刻意不回填**：这东西属于一次性输入（带 token 的地址、只在当次有效的
+        # 链接），记住它弊大于利。下载链接永久不写进配置，见 _persist_defaults。
         card.body.addWidget(self.form_row(
             "链接", self.url_edit,
             "每行一个链接即可批量下载；空行与 # 开头的行会被忽略",
@@ -314,7 +315,7 @@ class DownloadPage(PageBase):
         return urls
 
     def _persist_defaults(self, base: DownloadOptions | None = None) -> bool:
-        """把当前这组参数写回 config.defaults 并落盘。
+        """把当前这组**参数**写回 config.defaults 并落盘（链接除外，见下）。
 
         这几项以前只能靠"成功提交一次下载"才会写回，而浏览器扩展投递的任务是以
         config.defaults 为底的 —— 所以想让扩展任务用上新的线程数，得先去假下一次单。
@@ -322,7 +323,8 @@ class DownloadPage(PageBase):
         """
         opt = base if base is not None else self._collect()
         defaults = self.config.defaults
-        defaults.url = self.url_edit.toPlainText()   # 链接框的内容也一起记住
+        # 注意：**不存链接**。前面几项是"下次还想用"的参数，而链接是一次性的
+        # （带 token 的地址、只在当次有效的链接），记住它弊大于利。
         defaults.thread_count = opt.thread_count
         defaults.retry_count = opt.retry_count
         defaults.auto_select = opt.auto_select
