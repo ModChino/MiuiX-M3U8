@@ -77,7 +77,21 @@ def build_command(exe: str, opt: DownloadOptions) -> list[str]:
     value("-R", opt.max_speed)
 
     # 流选择
-    flag("--auto-select", opt.auto_select)
+    #
+    # 兜底：不给选流条件时，RE 会退化成**交互式选流菜单**（Spectre.Console 的
+    # MultiSelectionPrompt）。GUI 拉起的子进程 stdin 不是控制台，菜单一弹就抛
+    #   Unhandled exception: System.InvalidOperationException:
+    #   Cannot see if a key has been pressed when either application does not have
+    #   a console or when console input has been redirected from a file.
+    # 整条任务直接失败，日志里只剩一串 .NET 堆栈。
+    #
+    # 实测（v0.6.0-beta）——只有 --auto-select 或 -sv 能让它不进菜单：
+    #   什么都不给      -> 崩        -sa lang=en -> 崩
+    #   -sv best        -> 正常      -dv best    -> 崩
+    #   --auto-select   -> 正常
+    # RE 没有"禁用交互"的开关，所以这里按实测结论兜底：没有 -sv 就补 --auto-select。
+    # 宁可下一个默认画质，也不能让整条任务炸掉。
+    flag("--auto-select", opt.auto_select or not (opt.select_video or "").strip())
     value("-sv", opt.select_video)
     value("-sa", opt.select_audio)
     value("-ss", opt.select_subtitle)

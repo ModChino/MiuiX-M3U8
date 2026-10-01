@@ -115,7 +115,9 @@ class DownloadPage(PageBase):
         self.auto_select_switch.setText("自动选择最佳流")
         self.auto_select_switch.setChecked(self.config.defaults.auto_select)
         card.body.addWidget(self.form_row("自动选择", self.auto_select_switch,
-                                          "--auto-select：自动挑选分辨率最高的视频与最佳音轨"))
+                                          "--auto-select：自动挑选分辨率最高的视频与最佳音轨。"
+                                          "关掉后若没填下面的「选择视频」，内核会退化成交互式选流菜单"
+                                          "——GUI 下没有控制台，那种情况会直接崩，所以仍会回退成自动选择"))
 
         self.video_edit = MiuixLineEdit()
         self.video_edit.setPlaceholderText("如 best 或 res=1080&codecs=avc")

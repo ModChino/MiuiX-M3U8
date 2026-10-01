@@ -94,17 +94,21 @@ dist\
 
 ## 界面一览
 
+浅色：
+
 | ⚙️ 设置 | ℹ️ 关于 |
 |---|---|
 | ![设置](docs/shots/page_settings.png) | ![关于](docs/shots/page_about.png) |
 
-| 浅色 | 深色 |
-|---|---|
-| ![浅色](docs/shots/light.png) | ![深色](docs/shots/dark.png) |
+深色（同一套界面，切换即时生效）：
 
-| 最大化（沉浸式标题栏精确对齐工作区，不盖任务栏） |
-|---|
-| ![最大化](docs/shots/win_maximized.png) |
+| ⚙️ 设置 | ℹ️ 关于 |
+|---|---|
+| ![设置 深色](docs/shots/page_settings_dark.png) | ![关于 深色](docs/shots/page_about_dark.png) |
+
+| 📥 新建下载（深色） | 最大化（沉浸式标题栏精确对齐工作区，不盖任务栏） |
+|---|---|
+| ![新建下载 深色](docs/shots/page_download_dark.png) | ![最大化](docs/shots/win_maximized.png) |
 
 ---
 
