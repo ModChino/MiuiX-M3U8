@@ -1,8 +1,7 @@
 # MiuiX M3U8 架构与接口契约（冻结版 v1）
 
 > 目标：为 N_m3u8DL-RE 提供一个 **Miuix / 小米澎湃 OS 视觉风格** 的 Windows 桌面下载器。
-> 本文件是并行开发的**唯一接口契约**。实现方必须严格按签名实现；调用方按签名调用，不得自行改签名。
-> 如需变更契约，先通知 Lead，由 Lead 统一修改本文件。
+> 本文件是各模块之间的**接口契约**：签名与字段只增不删；改动要同步更新本文件与调用方。
 
 ---
 
@@ -21,48 +20,48 @@
 
 ---
 
-## 2. 目录结构与写作用域（**严格不得越界**）
+## 2. 目录结构
 
 ```
 MiuiX-M3U8/
 ├── app/
-│   ├── main.py                 [C] 入口：init_theme → MainWindow → exec
-│   ├── miuix/                  [A] 设计系统
+│   ├── main.py              入口：init_theme → MainWindow → exec
+│   ├── miuix/               设计系统
 │   │   ├── __init__.py
-│   │   ├── tokens.py           颜色/字号/圆角/间距 token
-│   │   ├── theme.py            ThemeManager + QSS 生成
-│   │   ├── widgets.py          基础组件
-│   │   └── icons.py            SVG 图标
-│   ├── core/                   [B] 核心引擎（纯逻辑，不 import QtWidgets）
+│   │   ├── tokens.py        颜色/字号/圆角/间距 token
+│   │   ├── theme.py         ThemeManager + QSS 生成
+│   │   ├── widgets.py       基础组件
+│   │   └── icons.py         SVG 图标
+│   ├── core/                核心引擎（纯逻辑，不 import QtWidgets）
 │   │   ├── __init__.py
-│   │   ├── model.py            DownloadOptions / DownloadTask / TaskStatus
-│   │   ├── nm3u8dl.py          参数 → 命令行
-│   │   ├── parser.py           stdout 行 → Event
-│   │   ├── runner.py           TaskRunner（subprocess + 读线程）
-│   │   ├── server.py           浏览器扩展的本地接收端
-│   │   ├── updater.py          内核版本检测 / 下载更新（纯标准库，不 import Qt）
-│   │   └── config.py           Config 持久化 + 依赖探测
-│   └── ui/                     [C] 页面
+│   │   ├── model.py         DownloadOptions / DownloadTask / TaskStatus
+│   │   ├── nm3u8dl.py       参数 → 命令行
+│   │   ├── parser.py        stdout 行 → Event
+│   │   ├── runner.py        TaskRunner（subprocess + 读线程）
+│   │   ├── server.py        浏览器扩展的本地接收端
+│   │   ├── updater.py       内核版本检测 / 下载更新（纯标准库，不 import Qt）
+│   │   └── config.py        Config 持久化 + 依赖探测
+│   └── ui/                  页面
 │       ├── __init__.py
-│       ├── window.py           MainWindow
-│       ├── taskcard.py         任务卡片
-│       ├── updater_ui.py       更新卡片的 Qt 胶水层（信号桥）
+│       ├── window.py        MainWindow
+│       ├── taskcard.py      任务卡片
+│       ├── updater_ui.py    更新卡片的 Qt 胶水层（信号桥）
 │       └── pages/
 │           ├── __init__.py
-│           ├── download.py     新建下载
-│           ├── tasks.py        任务列表
-│           └── settings.py     设置
-├── tests/                      [B] 自检（pytest 不必须，可直接 python 运行）
-├── tools/                      [Lead] 放 N_m3u8DL-RE.exe / ffmpeg.exe
-├── docs/                       [Lead]
-├── requirements.txt            [D]
-├── run.bat / build.bat         [D]
-└── README.md                   [D]
+│           ├── download.py  新建下载
+│           ├── tasks.py     任务列表
+│           └── settings.py  设置
+├── tests/                   自检（pytest 不必须，可直接 python 运行）
+├── tools/                   放 N_m3u8DL-RE.exe / ffmpeg.exe
+├── docs/                    接口契约、Miuix token、CLI 参考、截图
+├── requirements.txt
+├── run.bat / build.bat      Windows 运行 / 打包
+└── README.md
 ```
 
 ---
 
-## 3. 模块 A：`app/miuix/` —— 设计系统契约
+## 3. `app/miuix/` —— 设计系统契约
 
 ### 3.1 tokens.py
 
@@ -131,7 +130,7 @@ def theme() -> ThemeManager: ...          # 全局访问；未初始化则抛 Ru
 `.MiuixCard { background: %(surface_container)s; border-radius: %(lg)dpx; }`
 主题切换时重新生成并 `app.setStyleSheet()`。动态属性用 `setProperty("variant","filled")` + `[variant="filled"]` 选择器。
 
-### 3.3 widgets.py（**C 只能使用下列公开类，禁止直接 new 原生 Qt 控件做界面**）
+### 3.3 widgets.py（页面只使用下列公开类，不要直接 new 原生 Qt 控件做界面）
 
 ```python
 class MiuixCard(QFrame):          # .body: QVBoxLayout；构造 MiuixCard(parent=None, padding=16)
@@ -187,11 +186,11 @@ ICON_NAMES: set[str]
 
 ---
 
-## 4. 模块 B：`app/core/` —— 核心引擎契约
+## 4. `app/core/` —— 核心引擎契约
 
 > **不得 import 任何 QtWidgets**（runner.py 可用 QtCore 的 QProcess/QObject/Signal）。
 
-### 4.1 model.py —— 见上文字段表（Lead 已写入，直接用，不要删字段）
+### 4.1 model.py —— 见上文字段表（字段只增不删）
 
 ### 4.2 nm3u8dl.py
 
@@ -271,7 +270,7 @@ def detect_tools(base_dir: Path | None = None) -> dict[str, str]:
 
 ---
 
-## 5. 模块 C：`app/ui/` —— 页面契约
+## 5. `app/ui/` —— 页面契约
 
 - `MainWindow(QMainWindow)`：左侧 `MiuixNavRail`（下载 / 任务 / 设置 / 关于）+ 右侧 `QStackedWidget`。
 - 三页签名：`DownloadPage(runner: TaskRunner, config: Config, parent=None)`、`TasksPage(runner, config, parent=None)`、`SettingsPage(runner, config, parent=None)`。
@@ -284,5 +283,4 @@ def detect_tools(base_dir: Path | None = None) -> dict[str, str]:
 ## 6. 交付与验证
 
 - 所有实现必须能在 **offscreen** 下无异常渲染：`QT_QPA_PLATFORM=offscreen .venv/bin/python -c "import app.main"`
-- 截图自检脚本：`QT_QPA_PLATFORM=offscreen .venv/bin/python -m verify.shot [页面名]`（[D] 提供）
 - Windows 交付：`run.bat`（创建 venv + 装依赖 + 启动）、`build.bat`（PyInstaller 打包）

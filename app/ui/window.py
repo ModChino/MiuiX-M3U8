@@ -16,12 +16,14 @@ import ctypes
 import sys
 
 from PySide6.QtCore import QByteArray, QEvent, QPoint, Qt, QTimer
-from PySide6.QtGui import QCloseEvent
+from PySide6.QtGui import QAction, QCloseEvent
 from PySide6.QtWidgets import (
     QApplication,
     QHBoxLayout,
     QMainWindow,
+    QMenu,
     QStackedWidget,
+    QSystemTrayIcon,
     QVBoxLayout,
     QWidget,
 )
@@ -83,6 +85,11 @@ class MainWindow(QMainWindow):
         self.config = config
         self.server = server
         self.setWindowTitle(APP_NAME)
+        # 托盘状态：必须在 _build_ui 之前就位 —— 构造函数里 _on_nav_changed 会切页，
+        # 而 changeEvent 读得到 self.tray
+        self.tray: QSystemTrayIcon | None = None
+        self._force_quit = False        # 托盘菜单「退出」用：绕开「关闭到托盘」
+        self._tray_hinted = False       # 「已收进托盘」只提示一次
         # 无系统边框；Qt.Window 必须保留，否则 Windows 上任务栏项/焦点行为会异常
         self.setWindowFlag(Qt.WindowType.FramelessWindowHint, True)
         self.resize(*WINDOW_SIZE)
@@ -90,6 +97,7 @@ class MainWindow(QMainWindow):
         self._restore_geometry()
         self._build_ui()
         self._apply_background()
+        self._setup_tray()
 
     # ------------------------------------------------------------ 构建
     def _build_ui(self) -> None:
@@ -155,10 +163,76 @@ class MainWindow(QMainWindow):
         else:
             self.showMaximized()
 
+    # ------------------------------------------------------------ 系统托盘
+    def _setup_tray(self) -> None:
+        """建托盘图标。没有托盘的环境（部分 Linux 桌面）安静跳过，功能自动降级。"""
+        if not QSystemTrayIcon.isSystemTrayAvailable():
+            self.tray = None
+            return
+        self.tray = QSystemTrayIcon(QApplication.windowIcon(), self)
+        self.tray.setToolTip(APP_NAME)
+        self.tray.setContextMenu(self._build_tray_menu())
+        self.tray.activated.connect(self._on_tray_activated)
+        self.tray.show()
+
+    def _build_tray_menu(self) -> QMenu:
+        pal = theme().palette
+        menu = QMenu(self)
+        # 跟界面同一套 token，别弹出一块系统灰
+        menu.setStyleSheet(
+            f"QMenu {{ background: {pal.surface_container}; color: {pal.on_surface};"
+            f" border: 1px solid {pal.outline_variant}; border-radius: 10px; padding: 6px; }}"
+            f"QMenu::item {{ padding: 7px 22px; border-radius: 7px; }}"
+            f"QMenu::item:selected {{ background: {pal.primary}; color: {pal.on_primary}; }}"
+            f"QMenu::separator {{ height: 1px; background: {pal.outline_variant};"
+            f" margin: 5px 8px; }}"
+        )
+        show_action = QAction("显示主窗口", menu)
+        show_action.triggered.connect(self._restore_from_tray)
+        menu.addAction(show_action)
+        menu.addSeparator()
+        quit_action = QAction("退出 " + APP_NAME, menu)
+        quit_action.triggered.connect(self._quit_from_tray)
+        menu.addAction(quit_action)
+        return menu
+
+    def _on_tray_activated(self, reason: QSystemTrayIcon.ActivationReason) -> None:
+        """双击（Windows 上单击也可能是 Trigger）切换显示 / 收起。"""
+        if reason in (QSystemTrayIcon.ActivationReason.Trigger,
+                      QSystemTrayIcon.ActivationReason.DoubleClick):
+            if self.isVisible() and not self.isMinimized():
+                self.hide()
+            else:
+                self._restore_from_tray()
+
+    def _restore_from_tray(self) -> None:
+        self.showNormal()
+        self.raise_()
+        self.activateWindow()
+
+    def _quit_from_tray(self) -> None:
+        """托盘菜单里的「退出」。绕开「关闭到托盘」，真的退。"""
+        self._force_quit = True
+        self.close()
+        QApplication.quit()
+
+    def _to_tray(self, message: str) -> None:
+        """收进托盘并提示一次（同一句话只提示一次，别烦人）。"""
+        self.hide()
+        if self.tray is not None and not self._tray_hinted:
+            self._tray_hinted = True
+            self.tray.showMessage(APP_NAME, message, QSystemTrayIcon.MessageIcon.Information, 2500)
+
+    # ------------------------------------------------------------ 事件
     def changeEvent(self, event) -> None:      # noqa: N802
         super().changeEvent(event)
         if event.type() == QEvent.Type.WindowStateChange:
             self.titlebar.setMaximized(self.isMaximized())
+            if (self.isMinimized() and self.config.minimize_to_tray
+                    and self.tray is not None):
+                # 稍等一拍再收：立刻 hide() 的话窗口会先闪一下才消失
+                QTimer.singleShot(0, lambda: self._to_tray("已最小化到托盘，双击图标可重新打开"))
+                return
             # 无边框窗口最大化会盖住任务栏，等状态落定后对齐可用工作区
             QTimer.singleShot(0, self._fit_maximized_geometry)
 
@@ -272,12 +346,31 @@ class MainWindow(QMainWindow):
         return len(self.pages)
 
     def _on_nav_changed(self, index: int) -> None:
+        """切页。懒加载的页面在这里现场构造。
+
+        ⚠️ 构造 + 切换期间必须把绘制关掉。否则会看到"闪几个白色小方块"：
+        页面已经 setCurrentIndex 显示出来了，可里面的卡片还没跑过一次布局，
+        Qt 就先照着控件的初始几何画了一遍（卡片是白的，页面底是 #F7F7F7，
+        于是几块白方块闪一下）。实测复现不了不是因为它不存在 —— 而是 grab()
+        渲染的是完全就绪的状态；屏幕上闪的是没布局好的那一帧。
+        关掉绘制 → 构造 → 切换 → refresh → 强制跑完布局 → 再一次性打开，
+        用户看到的就是直接到位。
+        """
         if not 0 <= index < self.stack.count():
             return
-        page = self._ensure_page(index)
-        self.stack.setCurrentIndex(index)
-        if isinstance(page, PageBase):
-            page.refresh()
+        self.stack.setUpdatesEnabled(False)
+        try:
+            page = self._ensure_page(index)
+            self.stack.setCurrentIndex(index)
+            if isinstance(page, PageBase):
+                page.refresh()
+            if isinstance(page, PageBase):
+                page.ensurePolished()
+                layout = page.layout()
+                if layout is not None:
+                    layout.activate()      # 立刻算完，别等下一个事件循环
+        finally:
+            self.stack.setUpdatesEnabled(True)
 
     # ------------------------------------------------------------ 窗口状态
     def _restore_geometry(self) -> None:
@@ -295,4 +388,11 @@ class MainWindow(QMainWindow):
             self.config.save()
         except Exception:
             pass
+        # 「关闭到托盘」：拦下这次关闭，只把窗口藏起来。托盘菜单里的「退出」会先把
+        # _force_quit 置真，所以那条路不受影响。
+        if (self.config.close_to_tray and self.tray is not None
+                and not self._force_quit):
+            event.ignore()
+            self._to_tray("已收进托盘，双击图标可重新打开")
+            return
         super().closeEvent(event)

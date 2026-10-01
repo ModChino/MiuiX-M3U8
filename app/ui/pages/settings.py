@@ -14,7 +14,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QUrl
 from PySide6.QtGui import QDesktopServices, QGuiApplication
-from PySide6.QtWidgets import QFileDialog, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QFileDialog, QSystemTrayIcon, QVBoxLayout, QWidget
 
 from app.core import updater
 from app.core.config import Config, detect_tools
@@ -71,6 +71,7 @@ class SettingsPage(PageBase):
         body.addWidget(self._build_server_card())
         body.addWidget(self._build_download_card())
         body.addWidget(self._build_appearance_card())
+        body.addWidget(self._build_tray_card())
         body.addWidget(self._build_about_card())
         body.addStretch(1)
         self._connect()
@@ -198,6 +199,29 @@ class SettingsPage(PageBase):
     # 用起来像"冲突"。已删除 —— 现在由下载页在提交任务时把这几项写回 config，
     # 下次打开就是上次用的值，只有一个地方能改。
 
+    # ------------------------------------------------------------ 系统托盘
+    def _build_tray_card(self) -> QWidget:
+        card = self.card("🖥️ 系统托盘")
+        tray_ok = QSystemTrayIcon.isSystemTrayAvailable()
+        if not tray_ok:
+            card.body.addWidget(self.hint("当前系统没有可用的托盘，下面两项不会生效"))
+
+        self.min_tray_switch = MiuixSwitch()
+        self.min_tray_switch.setText("最小化到托盘")
+        self.min_tray_switch.setEnabled(tray_ok)
+        card.body.addWidget(self.form_row(
+            "最小化", self.min_tray_switch, "点最小化按钮时收进托盘，而不是缩到任务栏"))
+
+        self.close_tray_switch = MiuixSwitch()
+        self.close_tray_switch.setText("关闭到托盘")
+        self.close_tray_switch.setEnabled(tray_ok)
+        card.body.addWidget(self.form_row(
+            "关闭窗口", self.close_tray_switch,
+            "点关闭按钮只收进托盘，程序继续在后台跑 —— 此时要退出请右键托盘图标选「退出」"))
+
+        card.body.addWidget(self.hint("托盘图标：双击显示 / 收起主窗口；右键可退出程序"))
+        return card
+
     # ------------------------------------------------------------ 关于
     def _build_about_card(self) -> QWidget:
         card = self.card("ℹ️ 关于")
@@ -233,6 +257,8 @@ class SettingsPage(PageBase):
 
         self.check_btn.clicked.connect(self._check_update)
         self.update_btn.clicked.connect(self._download_update)
+        self.min_tray_switch.toggled.connect(self._apply_tray)
+        self.close_tray_switch.toggled.connect(self._apply_tray)
         self.accel_switch.toggled.connect(self._apply_update_settings)
         self.accel_edit.editingFinished.connect(self._apply_update_settings)
         self.proxy_edit.editingFinished.connect(self._apply_update_settings)
@@ -398,6 +424,13 @@ class SettingsPage(PageBase):
         if not QDesktopServices.openUrl(QUrl.fromLocalFile(str(path))):
             toast(self, f"打开失败：{path}", "error")
 
+    # ------------------------------------------------------------ 托盘
+    def _apply_tray(self) -> None:
+        """两个托盘开关 —— 改完即存（窗口的 closeEvent / changeEvent 直接读 config）。"""
+        self.config.minimize_to_tray = self.min_tray_switch.isChecked()
+        self.config.close_to_tray = self.close_tray_switch.isChecked()
+        self._save()
+
     # ------------------------------------------------------------ 内核更新动作
     def _apply_update_settings(self) -> None:
         """加速开关 / 加速地址 / 更新代理 —— 改完即存。"""
@@ -538,7 +571,8 @@ class SettingsPage(PageBase):
         guarded = (self.nm3u8dl_edit, self.ffmpeg_edit, self.save_dir_edit,
                    self.concurrent_combo, self.theme_combo,
                    self.server_switch, self.port_edit,
-                   self.accel_switch, self.accel_edit, self.proxy_edit)
+                   self.accel_switch, self.accel_edit, self.proxy_edit,
+                   self.min_tray_switch, self.close_tray_switch)
         for widget in guarded:
             widget.blockSignals(True)   # 载入时不写回配置
         self.nm3u8dl_edit.setText(config.nm3u8dl_path)
@@ -552,6 +586,8 @@ class SettingsPage(PageBase):
         self.accel_switch.setChecked(config.update_accel_enabled)
         self.accel_edit.setText(config.update_accel_prefix)
         self.proxy_edit.setText(config.update_proxy)
+        self.min_tray_switch.setChecked(config.minimize_to_tray)
+        self.close_tray_switch.setChecked(config.close_to_tray)
         for widget in guarded:
             widget.blockSignals(False)
         self._refresh_server_status()

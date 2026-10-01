@@ -161,6 +161,12 @@ class Config:
     #: 只给"检查更新 / 下载内核"用的代理（如 http://127.0.0.1:7890）；留空则跟随系统
     update_proxy: str = ""
 
+    # ---- 系统托盘 ----
+    #: 最小化时收进系统托盘（默认关，跟用户预期一致：点最小化就该最小化）
+    minimize_to_tray: bool = False
+    #: 点关闭按钮时收进托盘而不是退出（默认关 —— 默认开着会让人找不到怎么退）
+    close_to_tray: bool = False
+
     # ------------------------------------------------------------ 位置
     @staticmethod
     def file() -> Path:
@@ -208,7 +214,8 @@ class Config:
                     cfg.max_concurrent = max(1, int(value))
                 except (TypeError, ValueError):
                     pass
-            elif key in ("server_enabled", "update_accel_enabled"):
+            elif key in ("server_enabled", "update_accel_enabled",
+                         "minimize_to_tray", "close_to_tray"):
                 setattr(cfg, key, bool(value))
             elif key == "server_port":
                 try:
@@ -241,6 +248,8 @@ class Config:
             "update_accel_enabled": self.update_accel_enabled,
             "update_accel_prefix": self.update_accel_prefix,
             "update_proxy": self.update_proxy,
+            "minimize_to_tray": self.minimize_to_tray,
+            "close_to_tray": self.close_to_tray,
             "defaults": self.defaults.to_dict(),
         }
 
