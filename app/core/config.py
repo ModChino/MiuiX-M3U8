@@ -181,15 +181,19 @@ class Config:
         """读配置；文件不存在或损坏时返回默认配置（不抛异常）。
 
         程序目录里没有时回老位置找一次（配置从用户目录搬到了程序目录，不这样做
-        老用户升级上来设置会全丢）。找到后不立刻回写 —— 下次 save() 自然落到新位置。
+        老用户升级上来设置会全丢）。**读到老的就立刻在新位置落一份** ——
+        否则用户升级完在程序目录里找不到配置文件，得等到第一次 save 才出现。
         """
+        target = Config.file()
         data = None
-        for path in (Config.file(), *legacy_config_files()):
+        migrated = False
+        for path in (target, *legacy_config_files()):
             try:
                 data = json.loads(path.read_text(encoding="utf-8"))
             except (OSError, ValueError):
                 continue
             if isinstance(data, dict):
+                migrated = path != target
                 break
             data = None
         if not isinstance(data, dict):
@@ -213,6 +217,14 @@ class Config:
                     pass
             elif key in _STR_FIELDS and isinstance(value, str):
                 setattr(cfg, key, value)
+
+        if migrated:
+            # 从老位置读到的：立刻在程序目录落一份。否则用户找不到配置文件
+            # （load 只读不写，得等到第一次 save —— 那可能是关窗的那一刻）。
+            try:
+                cfg.save()
+            except OSError:
+                pass            # 程序目录写不进去时保持只读沿用，不打扰用户
         return cfg
 
     def to_dict(self) -> dict[str, object]:
