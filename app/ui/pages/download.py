@@ -14,7 +14,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.core.config import Config
-from app.core.model import DownloadOptions
+from app.core.model import THREAD_CHOICES, DownloadOptions
 from app.core.nm3u8dl import preview_command
 from app.core.runner import TaskRunner, default_save_dir
 from app.miuix.icons import icon
@@ -32,8 +32,7 @@ from app.miuix.widgets import (
 )
 from app.ui.pagebase import PAGE_MARGIN, ROW_SPACING, SCROLL_BOTTOM_EXTRA, PageBase, combo_int
 
-# 线程数 / 重试次数候选值（与 N_m3u8DL-RE 默认 16 / 3 对齐）
-THREAD_CHOICES: tuple[str, ...] = ("4", "8", "16", "32", "64")
+# 重试次数候选值（与 N_m3u8DL-RE 默认 3 对齐）
 RETRY_CHOICES: tuple[str, ...] = ("0", "1", "2", "3", "5", "10")
 MUX_FORMATS: tuple[str, ...] = ("mp4", "mkv", "ts")
 MUXERS: tuple[str, ...] = ("ffmpeg", "mkvmerge")
@@ -106,6 +105,12 @@ class DownloadPage(PageBase):
         self.retry_combo.addItems(list(RETRY_CHOICES))
         self.retry_combo.setCurrentText(str(self.config.defaults.retry_count))
         card.body.addWidget(self.form_row("重试次数", self.retry_combo, "单个分片下载失败后的重试次数"))
+
+        # 以前只有"成功提交一次下载"才会把这组参数写回 config.defaults，于是想改
+        # 浏览器扩展任务的线程数，得先去假下一次单 —— 这个按钮就是给那条路开的直通车。
+        self.apply_btn = MiuixButton("应用为默认", variant="tonal", icon=icon("check"))
+        self.apply_btn.setToolTip("把这组参数存成默认值，浏览器扩展投递的任务也会用它")
+        card.body.addWidget(self.spacer_row(self.apply_btn, stretch_before=False))
         return card
 
     # ------------------------------------------------------------ 流选择
@@ -224,6 +229,7 @@ class DownloadPage(PageBase):
     def _connect(self) -> None:
         """信号连接（在 _build 末尾由子类调用，保证控件都已创建）。"""
         self.dir_switch.toggled.connect(self._apply_dir_mode)
+        self.apply_btn.clicked.connect(self._apply_defaults_now)
         self.dir_btn.clicked.connect(self._pick_dir)
         self.key_file_btn.clicked.connect(self._pick_key_file)
         self.preview_btn.clicked.connect(self._preview_command)
@@ -307,6 +313,34 @@ class DownloadPage(PageBase):
             urls.append(url)
         return urls
 
+    def _persist_defaults(self, base: DownloadOptions | None = None) -> bool:
+        """把当前这组参数写回 config.defaults 并落盘。
+
+        这几项以前只能靠"成功提交一次下载"才会写回，而浏览器扩展投递的任务是以
+        config.defaults 为底的 —— 所以想让扩展任务用上新的线程数，得先去假下一次单。
+        「应用为默认」按钮走的就是这个函数（download.py 的 _apply_defaults_now）。
+        """
+        opt = base if base is not None else self._collect()
+        defaults = self.config.defaults
+        defaults.url = self.url_edit.toPlainText()   # 链接框的内容也一起记住
+        defaults.thread_count = opt.thread_count
+        defaults.retry_count = opt.retry_count
+        defaults.auto_select = opt.auto_select
+        defaults.mux_enabled = opt.mux_enabled
+        try:
+            self.config.save()
+            return True
+        except OSError:
+            return False
+
+    def _apply_defaults_now(self) -> None:
+        """「应用为默认」：立刻把这组参数存成默认值，不用先下点什么。"""
+        if not self._persist_defaults():
+            toast(self, "保存失败：配置文件写不进去", "error")
+            return
+        toast(self, "已存为默认参数：%d 线程 · 重试 %d 次"
+              % (self.config.defaults.thread_count, self.config.defaults.retry_count), "success")
+
     def _task_options(self, base: DownloadOptions, url: str, index: int,
                       total: int) -> DownloadOptions:
         """为批量里的第 index 条生成 options；同名会互相覆盖，批量时自动加序号。"""
@@ -334,19 +368,8 @@ class DownloadPage(PageBase):
             submitted += 1
         if not submitted:
             return
-        # 记下这次用的参数，下次打开还是它们。
-        # （设置页原有一张「默认参数」卡片能改这几项，但它与下载页的同名控件是同一份
-        #   数据、两个入口，改一边另一边不跟着变 —— 已经删掉，统一由这里写回。）
-        defaults = self.config.defaults
-        defaults.url = self.url_edit.toPlainText()
-        defaults.thread_count = base.thread_count
-        defaults.retry_count = base.retry_count
-        defaults.auto_select = base.auto_select
-        defaults.mux_enabled = base.mux_enabled
-        try:
-            self.config.save()
-        except Exception:
-            pass
+        # 记下这次用的参数，下次打开还是它们（见 _persist_defaults）
+        self._persist_defaults(base)
         if submitted == 1:
             if base.save_dir:
                 toast(self, "已加入下载队列", "success")

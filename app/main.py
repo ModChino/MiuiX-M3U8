@@ -13,7 +13,7 @@ from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication
 
 from app.core.config import _base_dir, Config, detect_tools
-from app.core.model import DownloadOptions
+from app.core.model import DownloadOptions, clean_thread_count
 from app.core.runner import TaskRunner
 from app.core.server import ReceiveServer
 from app.miuix.theme import init_theme
@@ -68,6 +68,15 @@ def build_extension_options(config: Config, payload: dict) -> DownloadOptions:
             headers.append("%s: %s" % (key, value))
     if headers:
         opt.headers = headers
+
+    # 扩展显式指定的线程数只作用于**这一个任务**，不写回 config.defaults ——
+    # 那会造出第二个数据源（设置页那张「默认参数」卡片当年就是这么被删掉的）。
+    #   · 键不存在  -> clean_thread_count(None) = None -> 沿用 defaults
+    #   · 白名单外  -> 同样 None -> 沿用 defaults（服务端已挡过一层，这里再挡一次，
+    #                  因为本函数也会被自检/其它调用方直接喂 payload）
+    threads = clean_thread_count(payload.get("thread_count"))
+    if threads is not None:
+        opt.thread_count = threads
     return opt
 
 

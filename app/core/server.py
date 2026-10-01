@@ -4,7 +4,10 @@
 
     GET  /ping   -> {"ok": true, "app": "MiuiX M3U8"}
     POST /add    -> {"ok": true, "task_id": "..."}
-                    body: {token, url, title?, referer?, cookie?, user_agent?, headers?}
+                    body: {token, url, title?, referer?, cookie?, user_agent?, headers?,
+                           thread_count?}
+                    thread_count 省略 = 沿用桌面端默认；取值必须是 4/8/16/32/64，
+                    其它值静默忽略（不报错）。
 
 为什么必须带 token：任何网页都能往 localhost 发请求。没有令牌的话，
 随便打开一个恶意页面就能往下载器里塞任务或者拿它探测内网。
@@ -25,6 +28,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Callable
 
 from PySide6.QtCore import QObject, Signal
+
+from app.core.model import clean_thread_count
 
 #: 请求体上限（扩展只发几十字节的 URL 和头，64KB 足够且能挡住滥用）
 MAX_BODY = 64 * 1024
@@ -131,6 +136,8 @@ class _Handler(BaseHTTPRequestHandler):
             return
 
         extra = data.get("headers")
+        # 白名单是"重建一个 dict"、只放行下面这几个键 —— 新增字段忘了加进来就会
+        # **静默丢弃**（扩展传了也当没传，很难查）。加字段务必同步这里。
         payload = {
             "url": url,
             "title": str(data.get("title") or "")[:200],
@@ -140,6 +147,11 @@ class _Handler(BaseHTTPRequestHandler):
             "headers": {str(k)[:80]: str(v)[:800]
                         for k, v in (extra.items() if isinstance(extra, dict) else [])},
         }
+        # 扩展显式指定的下载线程数。契约：**键不存在 = 不覆盖**，所以只有拿到合法值
+        # 才放进 payload（0 / null 都不是"跟随"的意思，见 SPEC-thread-count.md §3）。
+        thread_count = clean_thread_count(data.get("thread_count"))
+        if thread_count is not None:
+            payload["thread_count"] = thread_count
         task_id = ""
         if self.on_task is not None:
             try:

@@ -100,9 +100,22 @@ class TaskCard(MiuixCard):
         self.progress.setValue(0)
         body.addWidget(self.progress)
 
-        # 统计行：速度 / 分段 / 剩余时间 / 大小
-        self.stats_label = MiuixLabel("", style="caption", color="on_surface_variant")
-        body.addWidget(self.stats_label)
+        # 统计行：线程 / 速度 / 分段 / 剩余时间 / 大小 / 阶段备注 —— 一律做成胶囊，
+        # 跟标题那枚状态徽标同一套视觉语言；空的就隐藏，不占位。
+        self.stats_row = QWidget()
+        self.stats_layout = QHBoxLayout(self.stats_row)
+        self.stats_layout.setContentsMargins(0, 0, 0, 0)
+        self.stats_layout.setSpacing(ROW_SPACING)
+        self.stats_pills: dict[str, MiuixBadge] = {}
+        for key, tone in (("thread", "neutral"), ("speed", "primary"),
+                          ("segments", "neutral"), ("eta", "neutral"),
+                          ("size", "neutral"), ("note", "neutral")):
+            pill = MiuixBadge("", tone=tone)
+            pill.setVisible(False)
+            self.stats_pills[key] = pill
+            self.stats_layout.addWidget(pill)
+        self.stats_layout.addStretch(1)
+        body.addWidget(self.stats_row)
 
         # 日志面板（默认收起）
         self.log_view = MiuixTextEdit()
@@ -145,9 +158,7 @@ class TaskCard(MiuixCard):
         if self._changed("percent", value):
             self.progress.setValue(value)
 
-        stats = _format_stats(task)
-        if self._changed("stats", stats):
-            self.stats_label.setText(stats)
+        self._apply_stats(task)
 
         has_output = bool(task.output_path)
         if self._changed("output", has_output):
@@ -157,6 +168,17 @@ class TaskCard(MiuixCard):
             self.log_view.setPlainText("\n".join(task.log[-_LOG_TAIL:]))
             bar = self.log_view.verticalScrollBar()
             bar.setValue(bar.maximum())
+
+    def _apply_stats(self, task: DownloadTask) -> None:
+        """刷新统计胶囊：文案没变的 pill 直接跳过（高频刷新，别白写控件）。"""
+        texts = _stat_pills(task)
+        for key, pill in self.stats_pills.items():
+            text = texts.get(key, "")
+            visible = bool(text)
+            if pill.text() == text and pill.isVisible() == visible:
+                continue
+            pill.setText(text)
+            pill.setVisible(visible)
 
     def _changed(self, key: str, value: object) -> bool:
         """字段变化检测：返回值相同则跳过控件写入（高频刷新的关键）。"""
@@ -215,27 +237,47 @@ def _clamp(percent: float) -> float:
     return max(0.0, min(100.0, float(percent or 0.0)))
 
 
-def _format_stats(task: DownloadTask) -> str:
-    """统计行：速度 · 分段 · 剩余 · 大小（失败时附错误信息）。"""
-    parts: list[str] = []
-    if task.speed:
-        parts.append(f"速度 {task.speed}")
-    if task.segments:
-        parts.append(f"分段 {task.segments}")
-    if task.eta:
-        parts.append(f"剩余 {task.eta}")
-    if task.size:
-        parts.append(f"大小 {task.size}")
+#: 失败原因胶囊最多显示多少个字（再长就省略 —— 完整原因在展开的日志里）
+_PILL_MESSAGE_MAX = 44
+
+
+def _stage_note(task: DownloadTask) -> str:
+    """阶段备注胶囊：合并中 / 排队 / 耗时 / 失败原因 / 已取消。"""
     if task.status is TaskStatus.MUXING:
         # 合并阶段没有真实百分比，给明确的进行中提示 + 已用时
-        parts.append("正在合并音视频…")
-        parts.append(f"已用 {task.elapsed:.0f}s")
+        return "🎬 正在合并音视频… · 已用 %.0fs" % task.elapsed
     if task.status is TaskStatus.PENDING:
-        parts.append("等待空闲线程")
-    if task.status is TaskStatus.FAILED and task.message:
-        parts.append(task.message)
+        return "⏳ 等待空闲线程"
     if task.status is TaskStatus.DONE:
-        parts.append(f"耗时 {task.elapsed:.0f}s")
+        return "✅ 耗时 %.0fs" % task.elapsed
+    if task.status is TaskStatus.FAILED:
+        text = (task.message or "下载失败").strip().replace("\n", " ")
+        if len(text) > _PILL_MESSAGE_MAX:
+            text = text[:_PILL_MESSAGE_MAX] + "…"
+        return "❌ " + text
     if task.status is TaskStatus.CANCELED:
-        parts.append("已取消")
-    return " · ".join(parts) if parts else "—"
+        return "🚫 已取消"
+    return ""
+
+
+def _stat_pills(task: DownloadTask) -> dict[str, str]:
+    """统计胶囊的文案；值为空串表示这一枚不显示。
+
+    线程数取自 **task.options** —— 扩展投递的任务可能单独指定了线程数，跟桌面端
+    默认值不一样，所以不能去读 config.defaults。
+    """
+    pills: dict[str, str] = {}
+    if task.options.thread_count:
+        pills["thread"] = "🧵 %d 线程" % task.options.thread_count
+    if task.speed:
+        pills["speed"] = "⚡ " + task.speed
+    if task.segments:
+        pills["segments"] = "🧩 " + task.segments
+    if task.eta:
+        pills["eta"] = "⏱️ " + task.eta
+    if task.size:
+        pills["size"] = "💾 " + task.size
+    note = _stage_note(task)
+    if note:
+        pills["note"] = note
+    return pills

@@ -257,7 +257,9 @@ class Config:
     window_geometry: str = ""
     defaults: DownloadOptions = field(default_factory=DownloadOptions)
     @staticmethod
-    def file() -> Path: ...          # %APPDATA%/MiuiX-M3U8/config.json（非 Windows 用 ~/.config/MiuiX-M3U8/）
+    def file() -> Path: ...          # <程序所在目录>/config.json（便携版：拷目录即带走配置）
+                                     # 目录只读时回退 %APPDATA%/MiuiX-M3U8/（非 Windows 用 ~/.config/MiuiX-M3U8/）
+                                     # 读取时若新位置没有，会去上面这个老位置找一次（迁移）
     @staticmethod
     def load() -> "Config": ...
     def save(self) -> None: ...      # 原子写

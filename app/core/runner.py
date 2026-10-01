@@ -34,6 +34,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QCoreApplication, QObject, QTimer, Signal
 
+from .config import exe_dir
 from .model import DownloadOptions, DownloadTask, TaskStatus
 from .nm3u8dl import build_command
 from .parser import Event, OutputParser, resolve_output_path
@@ -61,10 +62,11 @@ def default_save_dir() -> str:
     界面提示写的是"留空则使用程序当前目录"，所以这里必须返回**程序所在目录**：
     打包后是 exe 所在目录，开发时是项目根。早先直接用了系统临时目录，
     结果产物静静躺在 %TEMP% 里，用户根本找不到 —— 提示与行为不符。
+
+    与配置文件同源（core.config.exe_dir），所以「配置」和「下载产物」永远在同一个
+    地方 —— 便携版拷走整个目录就都带走了。
     """
-    if getattr(sys, "frozen", False):
-        return str(Path(sys.executable).resolve().parent)
-    return str(Path(__file__).resolve().parents[2])
+    return str(exe_dir())
 
 
 def _pick_work_dir(save_dir: str) -> str:

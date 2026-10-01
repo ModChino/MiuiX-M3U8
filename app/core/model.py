@@ -28,6 +28,24 @@ class TaskStatus(str, Enum):
         return self in (TaskStatus.DONE, TaskStatus.FAILED, TaskStatus.CANCELED)
 
 
+#: 线程数合法档位。**只有这一份** —— 下载页下拉、浏览器扩展契约、服务端校验共用。
+#: 放在 core 而不是 UI：服务端不该 import app.ui（见 SPEC-thread-count.md §5.1）。
+THREAD_CHOICES: tuple[str, ...] = ("4", "8", "16", "32", "64")
+
+
+def clean_thread_count(value: object) -> int | None:
+    """把外部传来的线程数收敛到白名单；不合法一律 None（语义 = 不覆盖）。
+
+    浏览器扩展可能被改过、也可能有人手搓请求直接打本地接口，所以服务端要自己再验
+    一遍 —— 绝不能拿任意数字去拼命令行。
+    """
+    try:
+        count = int(value)          # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+    return count if str(count) in THREAD_CHOICES else None
+
+
 #: 状态显示名。带 emoji —— 任务列表里一眼扫过去就能分辨状态，不用读字。
 _LABELS = {
     TaskStatus.PENDING: "⏳ 排队中",

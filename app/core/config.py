@@ -41,6 +41,56 @@ _STR_FIELDS = ("theme_mode", "nm3u8dl_path", "ffmpeg_path", "save_dir", "window_
                "server_token", "update_accel_prefix", "update_proxy")
 
 
+def exe_dir() -> Path:
+    """程序"自己所在"的目录：打包后是 exe 旁边，开发时是项目根。
+
+    ⚠️ 与 _base_dir() 的区别：frozen 下 _base_dir() 指向 PyInstaller 的**临时解包
+    目录**（每次启动都换、退出即删），拿它放配置或下载产物都会丢。两者别混用。
+    """
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().parent
+    return Path(__file__).resolve().parents[2]
+
+
+def _user_config_dir() -> Path:
+    """用户级配置目录（老版本放配置的地方，现在只作为只读回退 + 迁移来源）。"""
+    if os.name == "nt":
+        base = os.environ.get("APPDATA") or str(Path.home() / "AppData" / "Roaming")
+        return Path(base)
+    return Path.home() / ".config"
+
+
+def legacy_config_files() -> list[Path]:
+    """配置的历史位置。
+
+    早期版本把配置放在 %APPDATA%/MiuiX-M3U8（非 Windows 是 ~/.config/MiuiX-M3U8），
+    后来改成跟程序放一起（便携版该有的样子）。**读的时候要回这里找一次**，
+    否则老用户升级上来设置全丢。
+    """
+    return [_user_config_dir() / APP_DIR_NAME / CONFIG_FILE_NAME]
+
+
+_WRITABLE_CACHE: dict[Path, bool] = {}
+
+
+def _writable(directory: Path) -> bool:
+    """目录能不能写。Windows 上 os.access 对目录不可靠，所以真的写一个探针文件试试。"""
+    cached = _WRITABLE_CACHE.get(directory)
+    if cached is not None:
+        return cached
+    ok = False
+    try:
+        directory.mkdir(parents=True, exist_ok=True)
+        probe = directory / ".miuix-write-probe"
+        probe.write_bytes(b"")
+        probe.unlink()
+        ok = True
+    except OSError:
+        ok = False
+    _WRITABLE_CACHE[directory] = ok
+    return ok
+
+
 def _base_dir() -> Path:
     """项目根目录。
 
@@ -114,21 +164,34 @@ class Config:
     # ------------------------------------------------------------ 位置
     @staticmethod
     def file() -> Path:
-        """配置文件路径。"""
-        if os.name == "nt":
-            base = os.environ.get("APPDATA") or str(Path.home() / "AppData" / "Roaming")
-            return Path(base) / APP_DIR_NAME / CONFIG_FILE_NAME
-        return Path.home() / ".config" / APP_DIR_NAME / CONFIG_FILE_NAME
+        """配置文件路径：**程序所在目录**（便携版该有的样子 —— 拷走整个目录，
+        设置和下载记录一起带走）。
+
+        目录写不进去时（装在 Program Files、只读介质）退回用户配置目录，
+        否则用户一改设置就报错。
+        """
+        home = exe_dir()
+        if _writable(home):
+            return home / CONFIG_FILE_NAME
+        return _user_config_dir() / APP_DIR_NAME / CONFIG_FILE_NAME
 
     # ------------------------------------------------------------ 读写
     @staticmethod
     def load() -> "Config":
-        """读配置；文件不存在或损坏时返回默认配置（不抛异常）。"""
-        path = Config.file()
-        try:
-            data = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, ValueError):
-            return Config()
+        """读配置；文件不存在或损坏时返回默认配置（不抛异常）。
+
+        程序目录里没有时回老位置找一次（配置从用户目录搬到了程序目录，不这样做
+        老用户升级上来设置会全丢）。找到后不立刻回写 —— 下次 save() 自然落到新位置。
+        """
+        data = None
+        for path in (Config.file(), *legacy_config_files()):
+            try:
+                data = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                continue
+            if isinstance(data, dict):
+                break
+            data = None
         if not isinstance(data, dict):
             return Config()
 
