@@ -2,6 +2,9 @@
 
 为 [N_m3u8DL-RE](https://github.com/nilaoda/N_m3u8DL-RE) 打造的 **Windows 桌面下载器**，界面复刻小米 **Miuix / 澎湃 OS（HyperOS）** 设计语言。
 
+- **⬇️ 下载** —— [**最新 Release**](https://github.com/ModChino/MiuiX-M3U8/releases/latest)：Windows x64 便携包，解压即用，**不用装 Python**。历史版本与改动见 [Releases](https://github.com/ModChino/MiuiX-M3U8/releases)。
+- **🧩 浏览器扩展** —— [**MiuiX-M3U8-Extension**](https://github.com/ModChino/MiuiX-M3U8-Extension)：在视频页一键把链接投递到桌面端（独立仓库，MV3 + 原生 JS，零依赖）。
+
 技术选型、接口契约、Miuix 设计 token 的完整推导过程见 `docs/`。
 
 ![新建下载](docs/shots/page_download.png)
@@ -11,6 +14,9 @@
 ---
 
 ## 快速开始（Windows）
+
+> 只是想用的话，直接下 [**最新 Release**](https://github.com/ModChino/MiuiX-M3U8/releases/latest)，
+> 解压双击 `MiuiX-M3U8.exe` 即可，下面这些是**从源码跑**的步骤。
 
 1. 安装 **Python 3.11+**（安装时勾选 *Add Python to PATH*）
 2. 双击 **`run.bat`** —— 首次运行会自动创建 `.venv` 并安装 PySide6，然后启动
