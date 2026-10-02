@@ -3,11 +3,13 @@
 MainWindow = 自绘标题栏 + 左侧 MiuixNavRail（下载 / 任务 / 设置 / 关于）+ 右侧 QStackedWidget。
 
 窗口没有系统边框，标题栏与界面同风格（见 app/ui/titlebar.py）。为保证 Windows 上
-仍有原生体验，做了三件事：
-1. 边缘缩放走 nativeEvent 的 WM_NCHITTEST，返回 HTLEFT/HTTOP 等 —— 拉边、双击标题栏
+仍有原生体验，做了四件事：
+1. 补回 WS_THICKFRAME 样式位（见 _enable_native_resize）—— **缺了它，下面第 2 条的
+   命中测试再正确也不会真的开始缩放**（实测：鼠标变成缩放箭头，窗口纹丝不动）；
+2. 边缘缩放走 nativeEvent 的 WM_NCHITTEST，返回 HTLEFT/HTTOP 等 —— 拉边、双击标题栏
    最大化、Aero Snap 全部由系统处理，比纯 Qt 手搓缩放稳得多；
-2. 最大化时对齐 screen().availableGeometry()，否则无边框窗口会盖住任务栏；
-3. 用 DWM 给窗口补 Windows 11 的系统圆角（失败静默忽略）。
+3. 最大化时对齐 screen().availableGeometry()，否则无边框窗口会盖住任务栏；
+4. 用 DWM 给窗口补 Windows 11 的系统圆角（失败静默忽略）。
 非 Windows 平台这些分支全部跳过，不影响 Linux/macOS 开发。
 """
 from __future__ import annotations

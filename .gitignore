@@ -20,9 +20,14 @@ build/
 dist/
 *.spec
 
-# ---- 本机自检与调试文档：本机跑，不进仓库 ----
-# 与扩展仓库（MiuiX-M3U8-Extension）同一约定。
+# ---- 本机自检与开发辅助：文件留在本地，不进仓库 ----
+# 约定同扩展仓库（MiuiX-M3U8-Extension）：仓库里只放"clone 下来就能跑"的东西。
+#   tests/                          核心自检 + 假引擎
+#   scripts/make_icon.py            图标生成器（图标本身在 docs/icon/）
+#   docs/nm3u8dl-sample-output.txt  解析器的实测样例，自检用
 tests/
+scripts/
+docs/nm3u8dl-sample-output.txt
 
 # ---- 系统 / 编辑器杂物 ----
 Thumbs.db

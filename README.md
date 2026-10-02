@@ -18,8 +18,8 @@
 
    | 工具 | 必需性 | 说明 |
    |---|---|---|
-   | `N_m3u8DL-RE.exe` | **必需** | 下载内核，已随仓库附带 v0.6.0-beta (win-x64) |
-   | `ffmpeg.exe` | **必需** | RE 启动时会强制检查，缺失直接报错；已附带 |
+   | `N_m3u8DL-RE.exe` | **必需** | 下载内核，v0.6.0-beta (win-x64) |
+   | `ffmpeg.exe` | **必需** | RE 启动时会强制检查，缺失直接报错 |
    | `mp4decrypt.exe` | 可选 | 解密 DRM 流时需要（默认解密引擎） |
    | `shaka-packager.exe` | 可选 | 换用 SHAKA_PACKAGER 解密引擎时需要 |
 
@@ -145,9 +145,8 @@ MiuiX-M3U8/
 │       ├── titlebar.py    沉浸式标题栏（窗口按钮全部 QPainter 自绘）
 │       ├── window.py      无边框主窗口 + Windows 原生窗口行为（拉边 / Snap / 最大化）
 │       └── pages/         下载 / 任务 / 设置 / 关于
-├── tools/                 外部可执行文件
-├── tests/                 核心自检（32 用例 / 343 断言）
-├── docs/                  接口契约、Miuix token、CLI 参考、实测样例、图标
+├── tools/                 外部可执行文件（.exe 不进仓库，用 get-tools.bat 下载）
+├── docs/                  接口契约、Miuix token、CLI 参考、应用图标
 ├── run.bat / build.bat    Windows 运行 / 打包
 └── requirements.txt
 ```
@@ -173,6 +172,9 @@ MIUIX_M3U8_E2E=1 .venv/bin/python -m tests.test_core
 # 离屏渲染，无需显示器
 QT_QPA_PLATFORM=offscreen .venv/bin/python -m app.main
 ```
+
+> `tests/`、`scripts/make_icon.py`、解析器的实测样例都是**本机自检 / 开发辅助**，
+> 不进仓库（见 `.gitignore`）—— 仓库里只放 clone 下来就能跑的东西。
 
 ### 为什么不用 Tauri / Electron
 
