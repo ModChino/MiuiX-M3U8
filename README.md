@@ -154,8 +154,9 @@ MiuiX-M3U8/
 浏览器扩展是**另一个仓库**，独立维护：[**MiuiX-M3U8-Extension**](https://github.com/ModChino/MiuiX-M3U8-Extension)
 
 MV3 + 原生 JS，零依赖零构建。两者代码零耦合，只通过 `http://127.0.0.1:<port>` 的
-`GET /ping` 与 `POST /add` 通信。打包时扩展会被复制一份进 exe
-（`--add-data "extension;extension"`），所以改完扩展要重新同步 + 重新打包才会进安装包。
+`GET /ping` 与 `POST /add` 通信。**本仓库不带扩展**（它只在自己仓库里维护）：
+想让打包出来的 exe 自带扩展，就把扩展仓库 clone 到 `extension\` 再跑 `build.bat`；
+没有这个目录时打包会跳过它，主程序照常能用，只是不能接收扩展投递的任务。
 
 ---
 
