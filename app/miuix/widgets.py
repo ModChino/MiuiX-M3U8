@@ -465,7 +465,18 @@ class MiuixComboBox(QComboBox):
         self.setFont(font_for("body1"))
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setMaxVisibleItems(10)
+        # 不用 WheelFocus：鼠标滚过时既不该抢焦点，更不该顺手改掉选项
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         _bind_theme(self)
+
+    def wheelEvent(self, event) -> None:  # noqa: N802
+        """滚轮不切换选项。
+
+        QComboBox 默认在滚轮下直接改 currentIndex —— 页面本身是可滚动的，
+        鼠标划过下拉框顺手滚一下就把选项改了（线程数 16 变 32 很难发现）。
+        忽略掉：事件冒泡给外层滚动区，页面照常滚。
+        """
+        event.ignore()
 
     def focusInEvent(self, event) -> None:  # noqa: N802
         self._focus = True
@@ -996,8 +1007,12 @@ class MiuixListItem(QWidget):
         text_box = QVBoxLayout()
         text_box.setContentsMargins(0, 0, 0, 0)
         text_box.setSpacing(2)
-        self._title = MiuixLabel(title, "main")
-        self._subtitle = MiuixLabel(subtitle, "footnote1", "on_surface_variant")
+        # ⚠️ 这两个 Label 必须**带 parent 创建**。无父控件的控件只要被 setVisible(True)，
+        # Qt 就会把它当成独立顶层窗口弹出来（默认 640×480 停在屏幕中间），
+        # 等下面 addWidget 认了父才消失 —— 实测关于页 8 个列表项 = 启动后第一次
+        # 进关于页时连闪 8 个空白小窗。带 parent 后 setVisible 只是"在列表项里隐藏"。
+        self._title = MiuixLabel(title, "main", parent=self)
+        self._subtitle = MiuixLabel(subtitle, "footnote1", "on_surface_variant", parent=self)
         self._subtitle.setVisible(bool(subtitle))
         text_box.addWidget(self._title)
         text_box.addWidget(self._subtitle)
@@ -1319,7 +1334,7 @@ class MiuixNavRail(QWidget):
         self._top = 24 + (36 if title else 0)
         self.setFixedWidth(int(METRIC["rail_w"]))
         self.setFont(font_for("body1"))
-        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        # 不设手型光标：整条导航栏都是热区，鼠标划过去就变手指很吵（用系统箭头）
         _bind_theme(self)
 
     # ---- 数据 ----

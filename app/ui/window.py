@@ -60,6 +60,23 @@ RESIZE_MARGIN = 8          # 拉边热区宽度(px)
 DWMWA_WINDOW_CORNER_PREFERENCE = 33
 DWMWCP_ROUND = 2
 
+GWL_STYLE = -16
+WS_THICKFRAME = 0x00040000
+SWP_NOSIZE, SWP_NOMOVE, SWP_NOZORDER, SWP_FRAMECHANGED = 0x0001, 0x0002, 0x0004, 0x0020
+
+# 显式声明 argtypes：不声明的话 ctypes 会把 64 位 HWND 当 32 位 int 传，
+# 句柄被截断、调用静默失败（GetWindowLongW 只会返回 0）。
+if _IS_WIN:
+    _user32 = ctypes.WinDLL("user32", use_last_error=True)
+    _user32.GetWindowLongW.argtypes = [ctypes.c_void_p, ctypes.c_int]
+    _user32.GetWindowLongW.restype = ctypes.c_long
+    _user32.SetWindowLongW.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_long]
+    _user32.SetWindowLongW.restype = ctypes.c_long
+    _user32.SetWindowPos.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_int,
+                                     ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_uint]
+else:
+    _user32 = None
+
 
 class _MSG(ctypes.Structure):
     """Win32 MSG 结构（只用到 message 与 lParam）。"""
@@ -248,7 +265,29 @@ class MainWindow(QMainWindow):
 
     def showEvent(self, event) -> None:        # noqa: N802
         super().showEvent(event)
+        self._enable_native_resize()
         self._apply_round_corners()
+
+    def _enable_native_resize(self) -> None:
+        """补回 WS_THICKFRAME，否则拉边缩放根本不会生效。
+
+        实测（真机注入鼠标拖右下角）：无边框窗口缺这个样式位时，nativeEvent 里
+        WM_NCHITTEST 明明返回了 HTBOTTOMRIGHT，Windows 也只是把鼠标变成缩放箭头，
+        窗口纹丝不动。补上样式位后用 SWP_FRAMECHANGED 让系统重算非客户区；
+        Qt 对 FramelessWindowHint 的窗口自己处理 WM_NCCALCSIZE，不会多出可见边框。
+        """
+        if not _IS_WIN:
+            return
+        try:
+            hwnd = ctypes.c_void_p(int(self.winId()))
+            style = _user32.GetWindowLongW(hwnd, GWL_STYLE)
+            if style & WS_THICKFRAME:
+                return
+            _user32.SetWindowLongW(hwnd, GWL_STYLE, style | WS_THICKFRAME)
+            _user32.SetWindowPos(hwnd, None, 0, 0, 0, 0,
+                                 SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER)
+        except Exception:
+            pass
 
     def _apply_round_corners(self) -> None:
         """Windows 11：给无边框窗口补上系统圆角（失败静默忽略）。"""
