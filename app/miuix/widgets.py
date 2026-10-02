@@ -8,6 +8,7 @@ from __future__ import annotations
 from PySide6.QtCore import (
     Property,
     QEasingCurve,
+    QPoint,
     QPointF,
     QPropertyAnimation,
     QRect,
@@ -1495,10 +1496,15 @@ _toasts: list["_Toast"] = []
 
 
 class _Toast(QWidget):
-    """顶部淡入淡出提示（内部实现，请用 `toast()`）。"""
+    """顶部淡入淡出提示（内部实现，请用 `toast()`）。
 
-    def __init__(self, parent: QWidget, text: str, tone: str) -> None:
+    挂在**顶层窗口**上，origin 只用来决定"在谁的区域里居中"。
+    """
+
+    def __init__(self, parent: QWidget, text: str, tone: str,
+                 origin: QWidget | None = None) -> None:
         super().__init__(parent)
+        self._origin = origin if origin is not None else parent
         self._label = MiuixBadge(text, tone, self)
         self._label.setFont(font_for("body2"))
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
@@ -1513,9 +1519,15 @@ class _Toast(QWidget):
         w = hint.width() + SPACING["lg"]
         h = max(hint.height() + SPACING["sm"], 34)
         self._label.setGeometry(0, 0, w, h)
-        parent = self.parentWidget()
-        x = int((parent.width() - w) / 2) if parent else 0
-        self.setGeometry(max(0, x), SPACING["xl"], w, h)
+        win = self.parentWidget()
+        src = self._origin
+        if win is None or src is None:
+            return
+        # 按"触发它的那块区域"居中，但坐标换算到顶层窗口 —— 挂在页面上时
+        # 同页的标题栏 / 按钮会盖住它，切页还会跟着页面一起被藏起来。
+        top_left = src.mapTo(win, QPoint(0, 0))
+        self.setGeometry(max(0, top_left.x() + int((src.width() - w) / 2)),
+                         max(0, top_left.y() + SPACING["xl"]), w, h)
 
     def show_message(self, duration_ms: int = 2200) -> None:
         self._layout_toast()
@@ -1546,9 +1558,14 @@ class _Toast(QWidget):
 
 
 def toast(parent: QWidget, text: str, tone: str = "neutral") -> None:
-    """在 parent 顶部居中淡入淡出一条提示；`tone` 同 MiuixBadge。"""
+    """在 parent 所在区域顶部居中淡入淡出一条提示；`tone` 同 MiuixBadge。
+
+    挂到**顶层窗口**而不是 parent 本身：parent 通常是 QStackedWidget 里的一页，
+    挂页面上会（1）被同页的标题栏 / 按钮压住，（2）切到别的页时跟着一起被藏起来 ——
+    而"下载完成"恰恰是用户往往不在任务页的时候弹的。
+    """
     if parent is None:
         return
-    tip = _Toast(parent, text, tone)
+    tip = _Toast(parent.window() or parent, text, tone, origin=parent)
     _toasts.append(tip)
     tip.show_message()

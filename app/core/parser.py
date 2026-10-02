@@ -62,6 +62,20 @@ _RE_SEG_PCT = re.compile(
 )
 #: 兜底：只有百分比（TERM=dumb 下形如 "Vid 1927 Kbps: 80%"）
 _RE_PCT = re.compile(r"(?<![\d.])(?P<pct>\d{1,3}(?:\.\d+)?)\s*%")
+
+#: 进度行里的流标签。N_m3u8DL-RE 对**每条正在下载的流各刷一行进度**，
+#: 实测音视频分离的流上 Vid / Aud / Sub 三行交错刷新，各自带自己的 done/total。
+_RE_STREAM = re.compile(r"(?P<kind>UnknownVid|Vid|Aud|Sub|Video|Audio|Subtitle)\b")
+
+
+def _stream_key(prefix: str) -> str:
+    """从进度行前缀里认流标签（取最后一个）；认不出来返回空串 = 归到同一个桶。"""
+    hits = _RE_STREAM.findall(prefix)
+    if not hits:
+        return ""
+    # 归一化：同一路流在不同渲染里可能叫 Vid / Video、Aud / Audio
+    return {"UnknownVid": "Vid", "Video": "Vid", "Audio": "Aud", "Subtitle": "Sub"}.get(
+        hits[-1], hits[-1])
 #: 已下载 / 总大小，如 7.52MB/12.53MB（后面不能紧跟字母，避免吃掉 7.52MBps）
 _RE_SIZE = re.compile(
     r"(?<![\w.])(?P<a>\d+(?:\.\d+)?)\s*(?P<ua>[KMGTP]?i?B)"
@@ -369,6 +383,10 @@ class OutputParser:
         self.save_dir: str = ""
         self.save_name: str = ""
         self._last_progress: tuple | None = None
+        #: 每条流各自的分片进度（流标签 -> (done, total)），对外报合计
+        self._streams: dict[str, tuple[int, int]] = {}
+        #: 认不出流标签时的兜底值（只有一条流的下载走这里）
+        self._fallback: tuple[int, int] | None = None
 
     # ------------------------------------------------------------ 对外
     def reset(self) -> None:
@@ -381,6 +399,8 @@ class OutputParser:
         self.save_dir = ""
         self.save_name = ""
         self._last_progress: tuple | None = None
+        self._streams.clear()
+        self._fallback = None
 
     def feed(self, chunk: str) -> list[Event]:
         """喂入一段原始输出，返回本次解析出的事件。"""
@@ -502,12 +522,21 @@ class OutputParser:
         if not matches:
             return []
         events: list[Event] = []
+        last_stream = ""
         for index, match in enumerate(matches):
             end = matches[index + 1].start() if index + 1 < len(matches) else len(text)
+            # 流标签在计数器**之前**：单独取前面那一段来认，字段本身仍从计数器处取
+            # （从上一段切起会把上一条的大小 / 速度也吃进来，实测速度会串行）。
+            begin = matches[index - 1].end() if index else 0
+            stream = _stream_key(text[begin:match.start()])
+            if stream:
+                last_stream = stream
+            else:
+                stream = last_stream    # 同一行原地重绘时，标签只在行首出现一次
             ev = _extract_progress(text[match.start():end])
             if ev is None:
                 continue
-            self._track(ev)
+            self._track(ev, stream)
             key = (ev.percent, ev.segments_done, ev.segments_total, ev.size, ev.speed, ev.eta)
             if key == self._last_progress:
                 continue
@@ -558,15 +587,40 @@ class OutputParser:
         # 非交互模式下进度行会粘在日志行尾部（形如 "...NaN: UnknownVid 1927 Kbps: 80%"）
         tail = _extract_progress(msg)
         if tail is not None and tail.percent is not None:
-            self._track(tail)
+            self._track(tail, _stream_key(msg))
             events.append(tail)
         return events
 
-    def _track(self, ev: Event) -> None:
-        """记录进度累计状态。"""
+    def _track(self, ev: Event, stream: str = "") -> None:
+        """记录进度累计状态。
+
+        多条流各自报自己的 done/total，直接覆盖会让界面上的分片数来回跳
+        （实测音视频分离时在 900 和 200 之间反复横跳 252 次）。这里按流分桶、
+        对外报**合计**：单调递增，语义也正是"这次下载一共多少个分片"。
+
+        认不出流标签的那条（RE 第一帧只画计数器、日志行尾粘着的进度也不带标签）
+        不能建桶 —— 否则会凭空多出一条流，把总分片数抬高（实测 303 变 404）。
+        它先作为"兜底值"顶着（只有一条流的下载仍然照常显示），一旦出现带标签的
+        流就作废 —— 那条兜底值本来就是其中某条流。
+        """
+        if ev.segments_total is not None:
+            if stream:
+                self._streams[stream] = (ev.segments_done or 0, ev.segments_total)
+            elif not self._streams:
+                self._fallback = (ev.segments_done or 0, ev.segments_total)
+            done, total = self._totals()
+            if total:
+                ev.segments_done, ev.segments_total = done, total
+                self.segments_done, self.segments_total = done, total
+                if len(self._streams) > 1:
+                    # 多流并发才需要合计百分比；单流时保留 RE 自己报的百分比
+                    ev.percent = round(done * 100.0 / total, 2)
         if ev.percent is not None:
             self.percent = ev.percent
-        if ev.segments_done is not None:
-            self.segments_done = ev.segments_done
-        if ev.segments_total is not None:
-            self.segments_total = ev.segments_total
+
+    def _totals(self) -> tuple[int, int]:
+        """对外报的分片进度：所有流合计；还没有带标签的流就用兜底值。"""
+        if self._streams:
+            return (sum(d for d, _ in self._streams.values()),
+                    sum(t for _, t in self._streams.values()))
+        return self._fallback or (0, 0)

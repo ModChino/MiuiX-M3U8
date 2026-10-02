@@ -50,6 +50,13 @@ def build_extension_options(config: Config, payload: dict) -> DownloadOptions:
     """
     opt = config.defaults.copy()
     opt.url = str(payload.get("url") or "")
+
+    # 保存目录：扩展没有"保存目录"输入框，所以按下载页「使用默认目录」那条链走 ——
+    # 设置页的默认目录 > 程序所在目录（空串交给 runner 处理，见 runner.default_save_dir）。
+    # 早先直接沿用 config.defaults.save_dir，而它永远是空的（「应用为默认」只存线程数
+    # 那几个参数），结果扩展任务一律掉进程序目录，用户在设置页里改默认目录也影响不到它。
+    opt.save_dir = config.save_dir or opt.save_dir
+
     title = clean_title(str(payload.get("title") or ""))
     if title:
         opt.save_name = title
