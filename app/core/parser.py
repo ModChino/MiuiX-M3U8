@@ -598,25 +598,28 @@ class OutputParser:
         （实测音视频分离时在 900 和 200 之间反复横跳 252 次）。这里按流分桶、
         对外报**合计**：单调递增，语义也正是"这次下载一共多少个分片"。
 
-        ⚠️ RE 的原地重绘**不保证每帧都带流标签**（实测首帧与大量中间帧只有计数器，
-        最后收尾那几帧才又带上）—— 只认标签会让分片数卡在 1 直到下载结束。
+        ⚠️ 分桶只是"尽力而为"：RE 的原地重绘不保证每帧都带流标签，不同流的 total
+        还可能相同 —— 认错了就会互相覆盖。所以对外报的数不依赖分桶正确性，
+        由 _totals() 给出一个结构上不会倒退的视图。
         """
         if ev.segments_total is not None:
-            total = ev.segments_total
-            key = self._bucket(stream, total)
-            self._streams[key] = (ev.segments_done or 0, total)
-            done, sum_total = self._totals()
-            if sum_total:
-                ev.segments_done, ev.segments_total = done, sum_total
-                self.segments_done, self.segments_total = done, sum_total
-                if len(self._streams) > 1:
-                    # 多流并发才需要合计百分比；单流时保留 RE 自己报的百分比
-                    ev.percent = round(done * 100.0 / sum_total, 2)
+            key = self._bucket(stream, ev.segments_total)
+            old_done, old_total = self._streams.get(key, (0, 0))
+            done = ev.segments_done or 0
+            if old_total == ev.segments_total:
+                done = max(done, old_done)      # 同一个桶只增不减
+            self._streams[key] = (done, ev.segments_total)
+            done, total = self._totals()
+            if total:
+                ev.segments_done, ev.segments_total = done, total
+                self.segments_done, self.segments_total = done, total
+                # 百分比跟着这个视图走：否则进度条会在两条流的百分比之间跳
+                ev.percent = round(done * 100.0 / total, 2)
         if ev.percent is not None:
             self.percent = ev.percent
 
     def _bucket(self, stream: str, total: int) -> str:
-        """给一条进度挑桶（同一条流必须始终落在同一个桶里）。
+        """给一条进度挑桶（尽力而为，认错了也不会让对外数字倒退）。
 
         1. 有标签就用标签；标签第一次出现时，把之前"按 total 认领"的桶改个名并过来
            —— 否则同一条流会被算两遍，总分片数直接翻倍；
@@ -638,6 +641,22 @@ class OutputParser:
         return "N:%d" % total
 
     def _totals(self) -> tuple[int, int]:
-        """对外报的分片进度：所有流合计。"""
-        return (sum(d for d, _ in self._streams.values()),
-                sum(t for _, t in self._streams.values()))
+        """对外报的分片进度：一个**结构上不可能倒退**的视图。
+
+        多条流是**异步并发**下载的（同一批帧里 Vid / Aud / Sub 交错刷新），流标签
+        时有时无，不同流的 total 甚至可能相同 —— 任何"按流精确归位"的做法都会认错
+        并互相覆盖，界面上就是 300 / 1 / 0 乱跳（真机实测）。
+
+        所以对外只报：total 取**最大的那条流**（通常就是视频），done 取该 total 下
+        所有桶的最大值。无论帧怎么交错、标签丢没丢，这两个数都只增不减。
+        """
+        if not self._streams:
+            return (0, 0)
+        total = max(t for _d, t in self._streams.values())
+        done = max((d for d, t in self._streams.values() if t == total), default=0)
+        # 视图只增不减：最大 total 换人时（实测音频 total 从 100 变 102）不能把
+        # 已有进度清零，否则界面会从 101/101 直接掉到 0/102。
+        if self.segments_total is not None:
+            total = max(total, self.segments_total)
+            done = max(done, min(self.segments_done or 0, total))
+        return (done, total)
