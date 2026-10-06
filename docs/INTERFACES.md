@@ -215,10 +215,19 @@ class Event:
     eta: str | None = None
     path: str | None = None
     text: str = ""
+    # 每条流的分片进度快照（标签, 已完成, 总数）。N_m3u8DL-RE 是**多条流异步
+    # 并发**刷新的，各流 done/total 互不相同 —— 界面按流分开展示（视频 / 音频 /
+    # 字幕各一枚胶囊），合成一个数字必然在两条流之间乱跳。
+    streams: tuple[tuple[str, int, int], ...] = ()
 
 class OutputParser:
     def feed(self, chunk: str) -> list[Event]: ...    # 支持 \r 分帧 + ANSI 剥离
     def reset(self) -> None: ...
+
+# 多流并发下的取舍：segments_done/segments_total 对外是一个**只增不减**的视图
+# （取总片数最大的那条流），供进度条 / 百分比使用；精确的每流进度看 streams。
+# 流标签时有时无、不同流的 total 还可能相同，任何"按流精确归位"的做法都会认错
+# 并互相覆盖 —— 实测过 300 / 1 / 0 乱跳。
 ```
 
 ### 4.4 runner.py

@@ -186,6 +186,9 @@ class Event:
     eta: str | None = None
     path: str | None = None
     text: str = ""
+    #: 每条流的分片进度快照（标签, 已完成, 总数）—— 异步并发下各流进度不同，
+    #: 界面按流分开展示，合成一个数字必然乱跳。
+    streams: tuple[tuple[str, int, int], ...] = ()
 
 
 def _split_glued(frame: str) -> list[str]:
@@ -609,6 +612,7 @@ class OutputParser:
             if old_total == ev.segments_total:
                 done = max(done, old_done)      # 同一个桶只增不减
             self._streams[key] = (done, ev.segments_total)
+            ev.streams = tuple((k, d, t) for k, (d, t) in self._streams.items())
             done, total = self._totals()
             if total:
                 ev.segments_done, ev.segments_total = done, total

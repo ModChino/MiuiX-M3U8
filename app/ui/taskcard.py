@@ -108,12 +108,15 @@ class TaskCard(MiuixCard):
         self.stats_layout.setSpacing(ROW_SPACING)
         self.stats_pills: dict[str, MiuixBadge] = {}
         for key, tone in (("thread", "neutral"), ("speed", "primary"),
-                          ("segments", "neutral"), ("eta", "neutral"),
+                          ("eta", "neutral"),
                           ("size", "neutral"), ("note", "neutral")):
             pill = MiuixBadge("", tone=tone)
             pill.setVisible(False)
             self.stats_pills[key] = pill
             self.stats_layout.addWidget(pill)
+        # 分片进度**每条流一枚**，插在"速度"后面：异步并发时各流进度不同，
+        # 合成一个数字必然乱跳（实测 300 / 1 / 0）。
+        self.stream_pills: dict[str, MiuixBadge] = {}
         self.stats_layout.addStretch(1)
         body.addWidget(self.stats_row)
 
@@ -179,6 +182,27 @@ class TaskCard(MiuixCard):
                 continue
             pill.setText(text)
             pill.setVisible(visible)
+        self._apply_stream_pills(task)
+
+    def _apply_stream_pills(self, task: DownloadTask) -> None:
+        """每条流一枚分片胶囊：视频 / 音频 / 字幕各自单调，互不干扰。"""
+        entries = _stream_pills(task)
+        alive: set[str] = set()
+        for index, (key, text) in enumerate(entries):
+            alive.add(key)
+            pill = self.stream_pills.get(key)
+            if pill is None:
+                pill = MiuixBadge("", tone="neutral")
+                pill.setVisible(False)
+                self.stream_pills[key] = pill
+                # 插在"线程 / 速度"之后，其余胶囊自然往后挪
+                self.stats_layout.insertWidget(2 + index, pill)
+            if pill.text() != text or not pill.isVisible():
+                pill.setText(text)
+                pill.setVisible(True)
+        for key, pill in self.stream_pills.items():
+            if key not in alive and pill.isVisible():
+                pill.setVisible(False)
 
     def _changed(self, key: str, value: object) -> bool:
         """字段变化检测：返回值相同则跳过控件写入（高频刷新的关键）。"""
@@ -260,6 +284,29 @@ def _stage_note(task: DownloadTask) -> str:
     return ""
 
 
+#: 每条流一枚分片胶囊；流太多会把统计行挤爆，封顶
+_STREAM_PILL_MAX = 4
+#: 流标签 -> 图标（认不出的用通用分片图标）
+_STREAM_ICONS = {"Vid": "🎬", "Aud": "🎵", "Sub": "💬"}
+
+
+def _stream_pills(task: DownloadTask) -> list[tuple[str, str]]:
+    """每条流一枚分片胶囊。
+
+    异步并发下载时各流的 done/total 完全不同，合成一个数字必然在两条流之间跳
+    （实测 300 / 1 / 0）—— 分开展示，每条流自己单调。
+    """
+    if not task.streams:
+        # 兜底：只有个合并过的字符串（老任务 / 没有分片信息的流）
+        return [("segments", "🧩 " + task.segments)] if task.segments else []
+    out: list[tuple[str, str]] = []
+    for key, done, total in task.streams[:_STREAM_PILL_MAX]:
+        if not total:
+            continue
+        out.append((key, "%s %d/%d" % (_STREAM_ICONS.get(key, "🧩"), done, total)))
+    return out
+
+
 def _stat_pills(task: DownloadTask) -> dict[str, str]:
     """统计胶囊的文案；值为空串表示这一枚不显示。
 
@@ -271,8 +318,6 @@ def _stat_pills(task: DownloadTask) -> dict[str, str]:
         pills["thread"] = "🧵 %d 线程" % task.options.thread_count
     if task.speed:
         pills["speed"] = "⚡ " + task.speed
-    if task.segments:
-        pills["segments"] = "🧩 " + task.segments
     if task.eta:
         pills["eta"] = "⏱️ " + task.eta
     if task.size:

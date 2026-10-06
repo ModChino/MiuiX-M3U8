@@ -523,6 +523,8 @@ class TaskRunner(QObject):
                     task.eta = ev.eta
                 if ev.segments_done is not None and ev.segments_total is not None:
                     task.segments = str(ev.segments_done) + "/" + str(ev.segments_total)
+                if ev.streams:
+                    task.streams = ev.streams
                 changed = True
                 continue
             self._append_log(task, ev.text)

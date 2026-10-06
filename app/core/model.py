@@ -145,6 +145,8 @@ class DownloadTask:
     speed: str = ""
     size: str = ""
     segments: str = ""
+    #: 每条流的分片进度（标签, 已完成, 总数），界面按流分开展示
+    streams: tuple[tuple[str, int, int], ...] = ()
     eta: str = ""
     message: str = ""
     output_path: str = ""
