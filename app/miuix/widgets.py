@@ -1237,9 +1237,12 @@ class MiuixDivider(QWidget):
 class MiuixBadge(QLabel):
     """胶囊标签（tone: neutral | success | error | warning | primary）。"""
 
-    def __init__(self, text: str, tone: str = "neutral", parent: QWidget | None = None) -> None:
+    def __init__(self, text: str, tone: str = "neutral", parent: QWidget | None = None,
+                 solid: bool = False) -> None:
         super().__init__(text, parent)
         self._tone = tone
+        #: 不透明底色（悬浮提示用）—— 半透明胶囊会把底下的标题 / 图标透出来
+        self._solid = solid
         self.setFont(font_for("footnote1"))
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
@@ -1254,14 +1257,19 @@ class MiuixBadge(QLabel):
         pal = _pal()
         tone = self._tone
         if tone == "success":
-            return with_alpha(pal.success, 0.16), qcolor(pal.success)
-        if tone == "error":
-            return with_alpha(pal.error, 0.16), qcolor(pal.error)
-        if tone == "warning":
-            return with_alpha(pal.warning, 0.18), qcolor(pal.warning)
-        if tone == "primary":
-            return with_alpha(pal.primary, 0.16), qcolor(pal.primary)
-        return qcolor(pal.secondary), qcolor(pal.on_secondary_variant)
+            fg, alpha = qcolor(pal.success), 0.16
+        elif tone == "error":
+            fg, alpha = qcolor(pal.error), 0.16
+        elif tone == "warning":
+            fg, alpha = qcolor(pal.warning), 0.18
+        elif tone == "primary":
+            fg, alpha = qcolor(pal.primary), 0.16
+        else:
+            return qcolor(pal.secondary), qcolor(pal.on_secondary_variant)
+        if self._solid:
+            # 压到不透明的容器色上：提示要"看得见地浮在最上层"
+            return blend(pal.surface_container_high, fg, alpha), fg
+        return with_alpha(fg, alpha), fg
 
     def sizeHint(self) -> QSize:  # noqa: N802
         fm = QFontMetrics(self.font())
@@ -1505,7 +1513,7 @@ class _Toast(QWidget):
                  origin: QWidget | None = None) -> None:
         super().__init__(parent)
         self._origin = origin if origin is not None else parent
-        self._label = MiuixBadge(text, tone, self)
+        self._label = MiuixBadge(text, tone, self, solid=True)
         self._label.setFont(font_for("body2"))
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         self._effect = QGraphicsOpacityEffect(self)
@@ -1526,8 +1534,10 @@ class _Toast(QWidget):
         # 按"触发它的那块区域"居中，但坐标换算到顶层窗口 —— 挂在页面上时
         # 同页的标题栏 / 按钮会盖住它，切页还会跟着页面一起被藏起来。
         top_left = src.mapTo(win, QPoint(0, 0))
+        # 在页头那一条带里垂直居中：页头只有左侧标题，中间是空的（操作按钮在下面
+        # 那行），提示放这儿既在最上方、又不会压到按钮
         self.setGeometry(max(0, top_left.x() + int((src.width() - w) / 2)),
-                         max(0, top_left.y() + SPACING["xl"]), w, h)
+                         max(0, top_left.y() + max(0, (METRIC["topbar_h"] - h) // 2)), w, h)
 
     def show_message(self, duration_ms: int = 2200) -> None:
         self._layout_toast()

@@ -607,12 +607,9 @@ class OutputParser:
         """
         if ev.segments_total is not None:
             key = self._bucket(stream, ev.segments_total)
-            old_done, old_total = self._streams.get(key, (0, 0))
-            done = ev.segments_done or 0
-            if old_total == ev.segments_total:
-                done = max(done, old_done)      # 同一个桶只增不减
-            self._streams[key] = (done, ev.segments_total)
-            ev.streams = tuple((k, d, t) for k, (d, t) in self._streams.items())
+            old_done, _old_total = self._streams.get(key, (0, 0))
+            self._streams[key] = (max(ev.segments_done or 0, old_done), ev.segments_total)
+            ev.streams = self._stream_snapshot()
             done, total = self._totals()
             if total:
                 ev.segments_done, ev.segments_total = done, total
@@ -623,26 +620,33 @@ class OutputParser:
             self.percent = ev.percent
 
     def _bucket(self, stream: str, total: int) -> str:
-        """给一条进度挑桶（尽力而为，认错了也不会让对外数字倒退）。
+        """给一条进度挑桶：**桶 = 流标签 + 总片数**。
 
-        1. 有标签就用标签；标签第一次出现时，把之前"按 total 认领"的桶改个名并过来
-           —— 否则同一条流会被算两遍，总分片数直接翻倍；
-        2. 没标签时沿用最近一次见到的流（它的 total 对得上才算），
-           再不行就找 total 相同的桶；
-        3. 都没有就按 total 立一个 —— 同一条流的 total 是稳定的。
+        · 带标签：标签 + total 定一条流（同一条流的 total 变了就是另一个桶，
+          不会把已有进度覆盖掉）；
+        · 不带标签（原地重绘时常有）：先找 total 相同的桶 —— 同一条流的 total 稳定，
+          这样既不会认错，也不会因为标签丢了就把进度丢掉；
+        · 都没有：按 total 立一个新桶（展示成 🧩）—— 多半是另一条没标签的流。
         """
         if stream:
-            legacy = "N:%d" % total
-            if stream not in self._streams and legacy in self._streams:
-                self._streams[stream] = self._streams.pop(legacy)
-            self._last_stream = stream
-            return stream
-        if self._last_stream and self._streams.get(self._last_stream, (0, 0))[1] == total:
-            return self._last_stream
+            return "%s|%d" % (stream, total)
         for key, (_done, seen_total) in self._streams.items():
             if seen_total == total:
                 return key
-        return "N:%d" % total
+        return "N|%d" % total
+
+    def _stream_snapshot(self) -> tuple[tuple[str, int, int], ...]:
+        """按标签合并后的每流进度。
+
+        同一个标签可能有多个桶（total 变过），这里取各桶的 max：对外永远只增不减，
+        界面上一条流也只显示一枚胶囊。
+        """
+        merged: dict[str, tuple[int, int]] = {}
+        for key, (done, total) in self._streams.items():
+            tag = key.split("|", 1)[0]
+            old_done, old_total = merged.get(tag, (0, 0))
+            merged[tag] = (max(old_done, done), max(old_total, total))
+        return tuple((tag, min(d, t), t) for tag, (d, t) in merged.items())
 
     def _totals(self) -> tuple[int, int]:
         """对外报的分片进度：一个**结构上不可能倒退**的视图。
@@ -654,10 +658,11 @@ class OutputParser:
         所以对外只报：total 取**最大的那条流**（通常就是视频），done 取该 total 下
         所有桶的最大值。无论帧怎么交错、标签丢没丢，这两个数都只增不减。
         """
-        if not self._streams:
+        snapshot = self._stream_snapshot()
+        if not snapshot:
             return (0, 0)
-        total = max(t for _d, t in self._streams.values())
-        done = max((d for d, t in self._streams.values() if t == total), default=0)
+        total = max(t for _tag, _d, t in snapshot)
+        done = max((d for _tag, d, t in snapshot if t == total), default=0)
         # 视图只增不减：最大 total 换人时（实测音频 total 从 100 变 102）不能把
         # 已有进度清零，否则界面会从 101/101 直接掉到 0/102。
         if self.segments_total is not None:
