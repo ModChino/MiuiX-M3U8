@@ -383,10 +383,10 @@ class OutputParser:
         self.save_dir: str = ""
         self.save_name: str = ""
         self._last_progress: tuple | None = None
-        #: 每条流各自的分片进度（流标签 -> (done, total)），对外报合计
+        #: 每条流各自的分片进度（桶名 -> (done, total)），对外报合计
         self._streams: dict[str, tuple[int, int]] = {}
-        #: 认不出流标签时的兜底值（只有一条流的下载走这里）
-        self._fallback: tuple[int, int] | None = None
+        #: 最近一次认出的流标签：RE 的原地重绘不保证每帧都带标签
+        self._last_stream: str = ""
 
     # ------------------------------------------------------------ 对外
     def reset(self) -> None:
@@ -400,7 +400,7 @@ class OutputParser:
         self.save_name = ""
         self._last_progress: tuple | None = None
         self._streams.clear()
-        self._fallback = None
+        self._last_stream = ""
 
     def feed(self, chunk: str) -> list[Event]:
         """喂入一段原始输出，返回本次解析出的事件。"""
@@ -598,29 +598,46 @@ class OutputParser:
         （实测音视频分离时在 900 和 200 之间反复横跳 252 次）。这里按流分桶、
         对外报**合计**：单调递增，语义也正是"这次下载一共多少个分片"。
 
-        认不出流标签的那条（RE 第一帧只画计数器、日志行尾粘着的进度也不带标签）
-        不能建桶 —— 否则会凭空多出一条流，把总分片数抬高（实测 303 变 404）。
-        它先作为"兜底值"顶着（只有一条流的下载仍然照常显示），一旦出现带标签的
-        流就作废 —— 那条兜底值本来就是其中某条流。
+        ⚠️ RE 的原地重绘**不保证每帧都带流标签**（实测首帧与大量中间帧只有计数器，
+        最后收尾那几帧才又带上）—— 只认标签会让分片数卡在 1 直到下载结束。
         """
         if ev.segments_total is not None:
-            if stream:
-                self._streams[stream] = (ev.segments_done or 0, ev.segments_total)
-            elif not self._streams:
-                self._fallback = (ev.segments_done or 0, ev.segments_total)
-            done, total = self._totals()
-            if total:
-                ev.segments_done, ev.segments_total = done, total
-                self.segments_done, self.segments_total = done, total
+            total = ev.segments_total
+            key = self._bucket(stream, total)
+            self._streams[key] = (ev.segments_done or 0, total)
+            done, sum_total = self._totals()
+            if sum_total:
+                ev.segments_done, ev.segments_total = done, sum_total
+                self.segments_done, self.segments_total = done, sum_total
                 if len(self._streams) > 1:
                     # 多流并发才需要合计百分比；单流时保留 RE 自己报的百分比
-                    ev.percent = round(done * 100.0 / total, 2)
+                    ev.percent = round(done * 100.0 / sum_total, 2)
         if ev.percent is not None:
             self.percent = ev.percent
 
+    def _bucket(self, stream: str, total: int) -> str:
+        """给一条进度挑桶（同一条流必须始终落在同一个桶里）。
+
+        1. 有标签就用标签；标签第一次出现时，把之前"按 total 认领"的桶改个名并过来
+           —— 否则同一条流会被算两遍，总分片数直接翻倍；
+        2. 没标签时沿用最近一次见到的流（它的 total 对得上才算），
+           再不行就找 total 相同的桶；
+        3. 都没有就按 total 立一个 —— 同一条流的 total 是稳定的。
+        """
+        if stream:
+            legacy = "N:%d" % total
+            if stream not in self._streams and legacy in self._streams:
+                self._streams[stream] = self._streams.pop(legacy)
+            self._last_stream = stream
+            return stream
+        if self._last_stream and self._streams.get(self._last_stream, (0, 0))[1] == total:
+            return self._last_stream
+        for key, (_done, seen_total) in self._streams.items():
+            if seen_total == total:
+                return key
+        return "N:%d" % total
+
     def _totals(self) -> tuple[int, int]:
-        """对外报的分片进度：所有流合计；还没有带标签的流就用兜底值。"""
-        if self._streams:
-            return (sum(d for d, _ in self._streams.values()),
-                    sum(t for _, t in self._streams.values()))
-        return self._fallback or (0, 0)
+        """对外报的分片进度：所有流合计。"""
+        return (sum(d for d, _ in self._streams.values()),
+                sum(t for _, t in self._streams.values()))
